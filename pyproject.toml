@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "respawn"
+version = "0.1.0"
+description = "Attribution-guided re-entry for failing LLM agents"
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "Harshit Taneja", email = "team@londongulfnexus.com" }]
+requires-python = ">=3.9"
+dependencies = []   # core is intentionally zero-dep
+
+[project.optional-dependencies]
+bench = [
+    "anthropic>=0.30.0",
+    "openai>=1.30.0",
+    "matplotlib>=3.8.0",
+    "numpy>=1.26.0",
+    "tqdm>=4.66.0",
+    "jsonlines>=4.0.0",
+]
+dev = [
+    "respawn[bench]",
+    "pytest>=8.0.0",
+    "pytest-cov>=5.0.0",
+    "ruff>=0.4.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/harshittaneja/respawn"
+Issues = "https://github.com/harshittaneja/respawn/issues"
+
+[tool.setuptools.packages.find]
+include = ["respawn*", "recoverybench*"]
+
+[tool.ruff]
+line-length = 99
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--tb=short -q"

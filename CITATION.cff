@@ -1,0 +1,29 @@
+cff-version: 1.2.0
+message: "If you use Respawn or RecoveryBench, please cite this work."
+type: software
+title: "Respawn: Attribution-Guided Re-Entry for Failing LLM Agents"
+version: 0.1.0
+date-released: "2026-06-21"
+license: MIT
+url: "https://github.com/harshittaneja/respawn"
+authors:
+  - family-names: Taneja
+    given-names: Harshit
+    email: team@londongulfnexus.com
+
+references:
+  - type: software
+    title: "Who&When: Step-Level Attribution for LLM Agent Traces"
+    authors:
+      - family-names: Taneja
+        given-names: Harshit
+    url: "https://github.com/harshittaneja/whoandwhen"
+    notes: "Used as the attribution oracle in RecoveryBench."
+
+  - type: software
+    title: "AgenTracer: Lightweight Execution Tracing for LLM Agents"
+    authors:
+      - family-names: Taneja
+        given-names: Harshit
+    url: "https://github.com/harshittaneja/agentracer"
+    notes: "Used for collecting execution traces fed into Respawn."
