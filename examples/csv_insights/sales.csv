@@ -1,0 +1,16 @@
+date,category,amount,status
+2026-01-03,Electronics,"$1,200.00",complete
+2026-01-05,Furniture,"$2,300.00",complete
+2026-01-07,Electronics,850.50,complete
+2026-01-09,Office,320.00,complete
+2026-01-11,Furniture,"1,150.00",complete
+2026-01-12,Electronics,"$499.99",complete
+2026-01-14,Office,"$1,499.99",complete
+2026-01-15,Furniture,675.25,complete
+2026-01-18,Office,89.95,refunded
+2026-01-20,Electronics,"$1,050.00",complete
+2026-01-22,Furniture,"$3,400.00",complete
+2026-01-24,Office,210.40,complete
+2026-01-26,Electronics,"2,200.00",complete
+2026-01-28,Furniture,540.00,refunded
+2026-01-30,Office,"$760.75",complete
