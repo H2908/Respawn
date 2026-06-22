@@ -51,15 +51,17 @@ class Verdict:
     p: float
     significant: bool
     note: str
+    baseline: str = "retry-at-crash"
 
     def line(self) -> str:
-        head = (f"  gap (respawn - retry) = {100*self.diff:+.1f}%   "
+        head = (f"  gap (respawn - {self.baseline}) = {100*self.diff:+.1f}%   "
                 f"95% CI [{100*self.ci_lo:+.1f}%, {100*self.ci_hi:+.1f}%]   "
                 f"McNemar p={self.p:.3f}   n={self.n_pairs} (discordant={self.discordant})")
         return head + f"\n  VERDICT: {self.note}"
 
 
-def assess(b: int, c: int, n_pairs: int, min_discordant: int = 10) -> Verdict:
+def assess(b: int, c: int, n_pairs: int, min_discordant: int = 10,
+           baseline: str = "retry-at-crash") -> Verdict:
     diff, lo, hi = paired_diff_ci(b, c, n_pairs)
     p = mcnemar_exact_p(b, c)
     discordant = b + c
@@ -67,11 +69,11 @@ def assess(b: int, c: int, n_pairs: int, min_discordant: int = 10) -> Verdict:
         sig, note = False, (f"INCONCLUSIVE — only {discordant} discordant pairs; "
                             "need more tasks/trials for power.")
     elif p < 0.05 and diff > 0:
-        sig, note = True, "SIGNIFICANT — respawn beats retry-at-crash."
+        sig, note = True, f"SIGNIFICANT — respawn beats {baseline}."
     elif p < 0.05 and diff < 0:
-        sig, note = False, "SIGNIFICANT in the OTHER direction — retry-at-crash wins."
+        sig, note = False, f"SIGNIFICANT in the OTHER direction — {baseline} wins."
     elif diff > 0:
         sig, note = False, "not significant (gap positive but CI includes 0)."
     else:
         sig, note = False, "not significant — no detectable difference (null)."
-    return Verdict(n_pairs, discordant, diff, lo, hi, p, sig, note)
+    return Verdict(n_pairs, discordant, diff, lo, hi, p, sig, note, baseline)
