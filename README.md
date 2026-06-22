@@ -4,7 +4,7 @@
 
 ### Most agent failures originate *upstream* of where they surface — so the failing step is the wrong place to intervene.
 
-[![CI](https://github.com/<your-username>/respawn/actions/workflows/ci.yml/badge.svg)](https://github.com/<your-username>/respawn/actions/workflows/ci.yml)
+[![CI](https://github.com/H2908/respawn/actions/workflows/ci.yml/badge.svg)](https://github.com/H2908/respawn/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue)](pyproject.toml)
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
