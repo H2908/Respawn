@@ -30,7 +30,7 @@ This is free and reproducible (`python experiments/whoandwhen.py`) — no model 
 If the cause is upstream, the natural fix is to **rewind to it and retry differently**. We tested that hypothesis on real models, and the answer is *it depends on the failure type* — which is the actual contribution here:
 
 - **On reasoning traces (Who&When), rewinding does NOT help** — a capable model re-reading the whole transcript self-corrects the upstream error *in place*, so rollback adds nothing. Live test: ≈1.0×, not significant. (A simulation predicted a large lift; it did **not** survive contact with real models.)
-- **On state-corrupting pipeline faults, rewinding DOES help — significantly** — when an early transform silently corrupts computed state, re-reading can't un-corrupt it; you must redo the faulty step and recompute. Live test (RecoveryLab, n=150, Haiku): **95% vs 78%**, McNemar **p<0.01**.
+- **On state-corrupting pipeline faults, rewinding DOES help — significantly** — when an early transform silently corrupts computed state, re-reading can't un-corrupt it; you must redo the faulty step and recompute. Live test (RecoveryLab, n=150, Haiku): **93% vs 79%**, McNemar **p≈0.001**.
 
 ![RecoveryLab result](docs/images/recoverylab_results.png)
 
@@ -62,6 +62,24 @@ res = respawn_chat(client, messages=[...], model="claude-haiku-4-5",
                    escalate=["claude-haiku-4-5", "claude-sonnet-4-6"],
                    validate=my_validator)
 ```
+
+## Examples
+
+Two runnable, offline showcases (no API key) that exercise the two halves of the
+claim on real, executing pipelines:
+
+- [`examples/csv_insights/`](examples/csv_insights/) — **what to change.** A messy
+  sales CSV where a silent parse fault reports **\$2,056** instead of the true
+  **\$16,117** (and the wrong top category). retry-at-crash stays wrong; respawn
+  re-enters at the parse step and recovers the correct figure.
+  `python examples/csv_insights/demo.py`
+
+- [`examples/ambiguous_pipeline/`](examples/ambiguous_pipeline/) — **where to
+  rewind.** A 5-step pipeline where a bug propagates downstream so several steps
+  look guilty. With a deliberately *imperfect* attributor (~43% top-1), respawn
+  still recovers **58%** vs blind re-entry's **38%** (McNemar p<0.001) — deciding
+  where pays off even when the attribution is often wrong.
+  `python examples/ambiguous_pipeline/run.py --trials 400`
 
 ## Install
 
@@ -100,6 +118,7 @@ This repo proves a measurement and maps where acting on it helps. It does **not*
 
 - [x] Who&When measurement of upstream-cause prevalence.
 - [x] Live re-execution probe (reasoning traces — null) and controlled pipeline test (significant).
+- [x] Real-pipeline examples for both halves of the claim (what to change; where to rewind).
 - [ ] Real attributor adapters (AgenTracer, LLM-judge) behind the `attributor` interface.
 - [ ] Durable-execution adapters (`reexecute` for Temporal / DBOS).
 - [ ] Side-effect compensation for non-re-enterable steps.
