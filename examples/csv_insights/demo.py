@@ -16,9 +16,9 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from respawn import point_attributor, recover  # noqa: E402
-
 from pipeline import build_pipeline, validate  # noqa: E402
+
+from respawn import point_attributor, recover  # noqa: E402
 
 CSV = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sales.csv")
 TRUE_TOTAL = 16116.88        # correct complete-revenue (robust parse), for display
