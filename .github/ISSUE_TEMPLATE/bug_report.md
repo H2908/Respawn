@@ -1,29 +1,15 @@
 ---
 name: Bug report
-about: Something broke
+about: Something doesn't work as documented
 labels: bug
 ---
 
-## Describe the bug
+**What happened**
 
-A clear and concise description of what the bug is.
+**Expected**
 
-## To reproduce
-
+**Minimal repro**
 ```python
-# Minimal reproducer
 ```
 
-## Expected behaviour
-
-What you expected to happen.
-
-## Actual behaviour
-
-What actually happened. Include the full traceback if applicable.
-
-## Environment
-
-- Respawn version:
-- Python version:
-- OS:
+**Environment**: respawn version, Python version, OS.

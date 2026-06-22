@@ -1,45 +1,41 @@
-import pytest
-
-from respawn.core import Respawn
-from respawn.failures import FailureEvent, FailureKind
-from respawn.strategies import Strategy
-
-TRACE = [
-    {"index": i, "role": "agent" if i % 2 == 0 else "tool", "content": f"step {i}"}
-    for i in range(8)
-]
+"""Tests for the single-step retry-differently core."""
+from respawn import Escalate, FailureType, Policy, Respawn, WeakOutput
 
 
-def test_recover_from_exception():
-    rs = Respawn()
-    plan = rs.recover(TimeoutError("timeout"), trace=TRACE)
-    assert plan.strategy == Strategy.PATCH_AND_CONTINUE
+def test_reframe_recovers_bad_output():
+    def step(a):
+        if "Fix exactly that" not in a.feedback:
+            raise WeakOutput("missing field 'total'")
+        return "ok"
+
+    r = Respawn(budget=4).run(step, model="small")
+    assert r.success
+    assert r.result == "ok"
+    assert r.attempts == 2
 
 
-def test_recover_from_failure_event():
-    rs = Respawn()
-    event = FailureEvent(kind=FailureKind.SEMANTIC, step_index=6, message="drift")
-    plan = rs.recover(failure=event, trace=TRACE)
-    assert plan.strategy == Strategy.TRUNCATE_AND_REPLAY
-    assert plan.reentry_point <= 6
+def test_escalate_climbs_model_ladder():
+    def step(a):
+        if a.model != "large":
+            raise WeakOutput(f"weak from {a.model}")
+        return a.model
+
+    pol = Policy(ladders={FailureType.BAD_OUTPUT: [Escalate(), Escalate()]})
+    r = Respawn(budget=4, policy=pol).run(step, model="small")
+    assert r.success
+    assert r.result == "large"
 
 
-def test_guarded_attaches_failure():
-    rs = Respawn()
+def test_gives_up_when_budget_exhausted():
+    def step(a):
+        raise RuntimeError("always")
 
-    @rs.guarded
-    def boom():
-        raise ValueError("bad")
-
-    with pytest.raises(ValueError) as exc_info:
-        boom()
-
-    assert hasattr(exc_info.value, "failure")
-    assert exc_info.value.failure.kind == FailureKind.SEMANTIC
+    r = Respawn(budget=1).run(step, model="small")
+    assert not r.success
+    assert r.error is not None
 
 
-def test_policy_escalates():
-    rs = Respawn()
-    event = FailureEvent(kind=FailureKind.POLICY, step_index=3, message="policy violation")
-    plan = rs.recover(failure=event, trace=TRACE)
-    assert plan.strategy == Strategy.ESCALATE
+def test_success_first_try():
+    r = Respawn().run(lambda a: 42, model="small")
+    assert r.success and r.result == 42 and r.attempts == 1
+    assert "OK" in r.explain()

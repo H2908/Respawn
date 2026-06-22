@@ -1,29 +1,27 @@
 cff-version: 1.2.0
-message: "If you use Respawn or RecoveryBench, please cite this work."
+title: "respawn: adaptive recovery for AI agents via attribution-guided re-entry"
+message: "If you use this software or RecoveryBench, please cite it."
 type: software
-title: "Respawn: Attribution-Guided Re-Entry for Failing LLM Agents"
-version: 0.1.0
-date-released: "2026-06-21"
-license: MIT
-url: "https://github.com/harshittaneja/respawn"
 authors:
-  - family-names: Taneja
-    given-names: Harshit
-    email: team@londongulfnexus.com
-
+  - family-names: "Harshit"
+    given-names: "Taneja"
+repository-code: "https://github.com/H2908/respawn"
+license: MIT
+version: 0.1.0
+date-released: "2026-06-20"
+keywords:
+  - llm agents
+  - failure attribution
+  - durable execution
+  - recovery
 references:
-  - type: software
-    title: "Who&When: Step-Level Attribution for LLM Agent Traces"
+  - type: conference-paper
+    title: "Which Agent Causes Task Failures and When? On Automated Failure Attribution of LLM Multi-Agent Systems"
+    year: 2025
+    collection-title: "ICML 2025"
     authors:
-      - family-names: Taneja
-        given-names: Harshit
-    url: "https://github.com/harshittaneja/whoandwhen"
-    notes: "Used as the attribution oracle in RecoveryBench."
-
-  - type: software
-    title: "AgenTracer: Lightweight Execution Tracing for LLM Agents"
-    authors:
-      - family-names: Taneja
-        given-names: Harshit
-    url: "https://github.com/harshittaneja/agentracer"
-    notes: "Used for collecting execution traces fed into Respawn."
+      - family-names: Zhang
+        given-names: Shaokun
+  - type: article
+    title: "AgenTracer: Failure Attribution in LLM Systems"
+    year: 2025

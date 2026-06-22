@@ -1,4 +1,4 @@
-.PHONY: install dev test lint data reproduce clean
+.PHONY: install dev test lint figures reproduce data clean
 
 install:
 	pip install -e .
@@ -7,28 +7,26 @@ dev:
 	pip install -e ".[dev]"
 
 test:
-	pytest tests/ -v --tb=short
+	pytest
 
 lint:
-	ruff check respawn/ recoverybench/ experiments/ examples/ tests/
-	ruff format --check respawn/ recoverybench/ experiments/ examples/ tests/
+	ruff check .
 
-format:
-	ruff format respawn/ recoverybench/ experiments/ examples/ tests/
-	ruff check --fix respawn/ recoverybench/ experiments/ examples/ tests/
+# Regenerate the synthetic figure + sweeps
+figures:
+	python experiments/run_recoverybench.py
 
+# Clone the external Who&When dataset (licensed separately by its authors)
 data:
-	pip install -e ".[bench]"
-	python experiments/whoandwhen.py --output data/whoandwhen_traces.jsonl
-	python experiments/run_recoverybench.py --generate-only --output data/scenarios.jsonl
+	git clone --depth 1 https://github.com/ag2ai/Agents_Failure_Attribution.git
 
-reproduce:
-	pip install -e ".[bench]"
-	python experiments/run_recoverybench.py \
-		--scenarios data/scenarios.jsonl \
-		--output results/ \
-		--figures docs/images/
+# Reproduce every number and figure in the README
+reproduce: figures
+	@if [ -d "Agents_Failure_Attribution/Who&When" ]; then \
+		python experiments/whoandwhen.py --data "Agents_Failure_Attribution/Who&When"; \
+	else \
+		echo ">> Who&When not found. Run 'make data' first, then 'make reproduce'."; \
+	fi
 
 clean:
-	rm -rf dist/ build/ *.egg-info .pytest_cache .ruff_cache
-	find . -type d -name __pycache__ -exec rm -rf {} +
+	rm -rf __pycache__ */__pycache__ .pytest_cache .ruff_cache *.egg-info build dist

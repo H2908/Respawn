@@ -1,49 +1,49 @@
-"""Demo: Respawn recovery without an API key.
+"""60-second demo. No API keys -- failures are simulated deterministically so
+you can see respawn diagnose each one and retry *differently*.
 
-Shows the core loop: simulate a failure, classify it, get a recovery plan.
-
-    python examples/demo.py
+    python -m demo      (from the repo root)  or   python demo.py
 """
-from respawn import Respawn
-from respawn.failures import FailureEvent, FailureKind
+from respawn import Escalate, FailureType, Policy, Respawn, WeakOutput
 
-# A synthetic 10-step agent trace
-trace = [
-    {"index": i, "role": "agent" if i % 2 == 0 else "tool", "content": f"step {i}"}
-    for i in range(10)
-]
 
-rs = Respawn()
+# --- Case 1: deterministic bad output. Replaying identically would loop forever.
+# The "model" only emits the required field once the error is fed back to it.
+def flaky_extractor(attempt):
+    if "Fix exactly that" not in attempt.feedback:
+        raise WeakOutput("missing required field 'invoice_total'")
+    return {"invoice_total": 42.0, "model_used": attempt.model}
 
-print("=== Transient failure (timeout at step 9) ===")
-event = FailureEvent(kind=FailureKind.TRANSIENT, step_index=9, message="Connection timeout")
-plan = rs.recover(failure=event, trace=trace)
-print(f"  strategy      : {plan.strategy}")
-print(f"  reentry_point : {plan.reentry_point}")
-print(f"  patch         : {plan.patch}")
-print(f"  rationale     : {plan.rationale}")
-print()
 
-print("=== Semantic failure (drift detected at step 7, cause at step 4) ===")
-event = FailureEvent(kind=FailureKind.SEMANTIC, step_index=7, message="Off-topic response detected")
-plan = rs.recover(failure=event, trace=trace)
-print(f"  strategy      : {plan.strategy}")
-print(f"  reentry_point : {plan.reentry_point}")
-print(f"  patch         : {plan.patch}")
-print(f"  rationale     : {plan.rationale}")
-print()
+# --- Case 2: rate limit, then success once we've backed off.
+_calls = {"n": 0}
+def rate_limited_call(attempt):
+    _calls["n"] += 1
+    if _calls["n"] == 1:
+        raise RuntimeError("429 Too Many Requests")
+    return "ok"
 
-print("=== Policy failure ===")
-event = FailureEvent(kind=FailureKind.POLICY, step_index=6, message="Content policy violation")
-plan = rs.recover(failure=event, trace=trace)
-print(f"  strategy      : {plan.strategy}")
-print(f"  reentry_point : {plan.reentry_point}")
-print()
 
-print("=== Exception-based recovery (auto-classify) ===")
-try:
-    raise TimeoutError("Connection timed out after 30s")
-except Exception as exc:
-    plan = rs.recover(failure=exc, trace=trace)
-    print(f"  classified as : {plan.strategy}")
-    print(f"  rationale     : {plan.rationale}")
+# --- Case 3: hard problem -- needs to climb the model ladder to land.
+def hard_reasoning(attempt):
+    if attempt.model != "large":
+        raise WeakOutput(f"answer from '{attempt.model}' failed the check")
+    return f"correct answer (solved on {attempt.model})"
+
+
+def show(title, step, policy=None, **kw):
+    r = Respawn(budget=4, policy=policy, on_event=lambda m: None).run(step, **kw)
+    print(f"\n=== {title} ===")
+    print(r.explain())
+    print("result:", r.result)
+
+
+if __name__ == "__main__":
+    show("bad output -> reframe with error fed back", flaky_extractor,
+         prompt="extract invoice fields", model="small")
+    show("rate limit -> back off, then succeed", rate_limited_call,
+         prompt="call the API", model="small")
+
+    # Custom policy: for weak answers, climb the model ladder immediately.
+    escalate_first = Policy(ladders={FailureType.BAD_OUTPUT: [Escalate(), Escalate()]})
+    show("weak answer -> escalate up the model ladder", hard_reasoning,
+         policy=escalate_first, prompt="solve the hard task", model="small")

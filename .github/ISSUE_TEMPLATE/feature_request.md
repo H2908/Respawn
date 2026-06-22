@@ -1,21 +1,11 @@
 ---
 name: Feature request
-about: Suggest an idea
+about: Propose an adapter, attributor, benchmark, or improvement
 labels: enhancement
 ---
 
-## Is your feature request related to a problem?
+**What and why** (which roadmap item, if any)
 
-A clear description of the problem. E.g. "I'm always frustrated when [...]"
+**Sketch of the interface / approach**
 
-## Describe the solution you'd like
-
-What you want to happen.
-
-## Alternatives considered
-
-Any alternative solutions or features you've considered.
-
-## Additional context
-
-Any other context, screenshots, or references.
+**Does it keep the core library dependency-free?**

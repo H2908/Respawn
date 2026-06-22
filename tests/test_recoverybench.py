@@ -1,54 +1,53 @@
-from recoverybench.controllers import (
-    full_restart_controller,
-    naive_truncate_controller,
-    respawn_controller,
+"""Honesty guardrails for RecoveryBench, enforced in CI.
+
+If any of these break, the benchmark is rigged. A PR that makes respawn look
+better by breaking one of these should be closed.
+"""
+from recoverybench import (
+    attribution_guided,
+    blind_search,
+    evaluate,
+    make_pool,
+    oracle,
+    retry_at_crash,
 )
-from recoverybench.model import RecoveryResult
-from recoverybench.simulate import generate_scenario, run_benchmark, run_scenario
+from recoverybench.model import Task
+
+POOL = make_pool(4000, seed=0, T=12, reliability=0.85, fix_prob=0.5,
+                 transient_fraction=0.3, max_distance=6)
+B = 20
 
 
-def test_generate_scenario_is_deterministic():
-    s1 = generate_scenario(seed=42)
-    s2 = generate_scenario(seed=42)
-    assert s1.id == s2.id
-    assert s1.archetype == s2.archetype
-    assert s1.ground_truth_reentry == s2.ground_truth_reentry
+def _rate(ctrl):
+    return evaluate(ctrl, POOL, B)["recovery_rate"]
 
 
-def test_generate_scenario_different_seeds():
-    s1 = generate_scenario(seed=1)
-    s2 = generate_scenario(seed=2)
-    assert s1.id != s2.id
+def test_guided_perfect_attribution_equals_oracle():
+    assert abs(_rate(attribution_guided(1.0)) - _rate(oracle)) < 0.03
 
 
-def test_full_restart_controller_returns_result():
-    scenario = generate_scenario(seed=0)
-    result = run_scenario(scenario, full_restart_controller)
-    assert isinstance(result, RecoveryResult)
-    assert result.reentry_point == 0
+def test_guided_uninformed_equals_blind_search():
+    # respawn can NEVER beat blind search when attribution carries no information
+    assert abs(_rate(attribution_guided(0.0)) - _rate(blind_search)) < 0.03
 
 
-def test_naive_truncate_reentry_at_fail_step():
-    scenario = generate_scenario(seed=1)
-    result = run_scenario(scenario, naive_truncate_controller)
-    assert result.reentry_point == scenario.failure.step_index
+def test_retry_at_crash_cannot_recover_upstream_causes():
+    upstream = [Task(T=12, crash=10, root=7, fix_prob=0.5, break_prob=0.15)
+                for _ in range(2000)]
+    assert evaluate(retry_at_crash, upstream, B)["recovery_rate"] == 0.0
 
 
-def test_respawn_controller_returns_result():
-    scenario = generate_scenario(seed=2)
-    result = run_scenario(scenario, respawn_controller)
-    assert isinstance(result, RecoveryResult)
-    assert 0 <= result.reentry_point <= scenario.failure.step_index
+def test_retry_at_crash_recovers_transient_failures():
+    transient = [Task(T=12, crash=10, root=10, fix_prob=0.5, break_prob=0.15)
+                 for _ in range(2000)]
+    assert evaluate(retry_at_crash, transient, B)["recovery_rate"] > 0.5
 
 
-def test_run_benchmark_covers_all_scenarios():
-    scenarios = [generate_scenario(seed=i) for i in range(5)]
-    controllers = {"respawn": respawn_controller}
-    results = run_benchmark(scenarios, controllers)
-    assert len(results["respawn"]) == 5
+def test_respawn_beats_retry_at_crash_at_realistic_attribution():
+    # at ~0.30 step accuracy (within what real attributors achieve)
+    assert _rate(attribution_guided(0.30)) > _rate(retry_at_crash)
 
 
-def test_wasted_call_ratio_range():
-    scenario = generate_scenario(seed=10)
-    result = run_scenario(scenario, respawn_controller)
-    assert 0.0 <= result.wasted_call_ratio <= 1.0
+def test_monotonic_in_attribution_accuracy():
+    rates = [_rate(attribution_guided(a)) for a in (0.0, 0.3, 0.6, 1.0)]
+    assert rates == sorted(rates)

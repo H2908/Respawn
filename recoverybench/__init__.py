@@ -1,5 +1,15 @@
-from recoverybench.model import FailureEvent as BenchFailureEvent
-from recoverybench.model import Scenario, Step
-from recoverybench.simulate import run_scenario
+"""RecoveryBench -- measuring recovery lift, not attribution accuracy."""
+from .controllers import (
+    attribution_guided,
+    blind_search,
+    oracle,
+    retry_at_crash,
+    rollback_all,
+)
+from .model import Task, sample_task
+from .simulate import evaluate, make_pool
 
-__all__ = ["Scenario", "Step", "BenchFailureEvent", "run_scenario"]
+__all__ = [
+    "Task", "sample_task", "make_pool", "evaluate",
+    "retry_at_crash", "rollback_all", "blind_search", "attribution_guided", "oracle",
+]

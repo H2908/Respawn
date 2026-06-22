@@ -1,77 +1,38 @@
-"""Scenario generation and batch simulation."""
+"""Monte Carlo harness: evaluate controllers on a shared pool of failed tasks.
+
+The same seeded task pool is used for every controller so comparisons are paired
+(each controller faces identical failures), and each controller gets its own RNG
+stream so its stochastic retries don't perturb the others.
+"""
 from __future__ import annotations
 
 import random
-from typing import Callable
+from typing import Dict, List
 
-from recoverybench.model import FailureEvent, RecoveryResult, Scenario, Step
-
-ARCHETYPES = ["planner", "retriever", "executor", "critic", "orchestrator"]
-FAILURE_KINDS = ["transient", "semantic", "tool", "policy"]
+from .controllers import Controller
+from .model import Task, sample_task
 
 
-def _make_trace(archetype: str, n_steps: int, rng: random.Random) -> list[Step]:
-    steps = []
-    for i in range(n_steps):
-        role = "agent" if i % 2 == 0 else "tool"
-        steps.append(
-            Step(
-                index=i,
-                role=role,
-                content=f"{archetype} step {i}",
-                cost_tokens=rng.randint(50, 300),
-                timestamp=float(i),
-            )
-        )
-    return steps
-
-
-def generate_scenario(seed: int) -> Scenario:
+def make_pool(n: int, seed: int = 0, **task_kwargs) -> List[Task]:
     rng = random.Random(seed)
-    archetype = rng.choice(ARCHETYPES)
-    n_steps = rng.randint(8, 20)
-    trace = _make_trace(archetype, n_steps, rng)
-    fail_step = rng.randint(n_steps // 2, n_steps - 1)
-    kind = rng.choice(FAILURE_KINDS)
-
-    # Ground truth: semantic failures cause step is upstream; others are at fail_step
-    if kind == "semantic":
-        gt_reentry = max(0, fail_step - rng.randint(2, 5))
-        gt_strategy = "truncate_and_replay"
-    elif kind == "transient":
-        gt_reentry = fail_step
-        gt_strategy = "patch_and_continue"
-    elif kind == "tool":
-        gt_reentry = fail_step
-        gt_strategy = "truncate_and_replay"
-    else:  # policy
-        gt_reentry = fail_step
-        gt_strategy = "escalate"
-
-    failure = FailureEvent(kind=kind, step_index=fail_step, message=f"Simulated {kind} error")
-    return Scenario(
-        id=f"scenario_{seed:04d}",
-        archetype=archetype,
-        trace=trace,
-        failure=failure,
-        ground_truth_reentry=gt_reentry,
-        ground_truth_strategy=gt_strategy,
-    )
+    return [sample_task(rng, **task_kwargs) for _ in range(n)]
 
 
-def run_scenario(
-    scenario: Scenario,
-    controller: Callable[[Scenario], RecoveryResult],
-) -> RecoveryResult:
-    return controller(scenario)
-
-
-def run_benchmark(
-    scenarios: list[Scenario],
-    controllers: dict[str, Callable[[Scenario], RecoveryResult]],
-) -> dict[str, list[RecoveryResult]]:
-    results: dict[str, list[RecoveryResult]] = {name: [] for name in controllers}
-    for scenario in scenarios:
-        for name, ctrl in controllers.items():
-            results[name].append(run_scenario(scenario, ctrl))
-    return results
+def evaluate(controller: Controller, pool: List[Task], budget: int,
+             seed: int = 1234) -> Dict[str, float]:
+    rng = random.Random(seed)
+    recovered = 0
+    spent_total = 0
+    spent_on_success = 0
+    for task in pool:
+        ok, spent = controller(task, budget, rng)
+        spent_total += spent
+        if ok:
+            recovered += 1
+            spent_on_success += spent
+    n = len(pool)
+    return {
+        "recovery_rate": recovered / n,
+        "avg_budget_spent": spent_total / n,
+        "avg_cost_per_success": (spent_on_success / recovered) if recovered else float("nan"),
+    }

@@ -1,85 +1,93 @@
-"""Recovery controllers evaluated in RecoveryBench.
+"""Recovery controllers. Each spends a step-execution budget trying to recover a
+failed Task, choosing WHERE to re-enter the trajectory on each attempt.
 
-Each controller is a callable:
-    (scenario: Scenario) -> RecoveryResult
+A controller is a function: (task, budget, rng) -> (recovered: bool, spent: int).
+All share the same per-attempt success model from Task; they differ ONLY in the
+policy for choosing the re-entry point j. That is the whole experiment.
 """
 from __future__ import annotations
 
-import time
+import random
+from typing import Callable, Tuple
 
-from recoverybench.model import RecoveryResult, Scenario
+from .model import Task
+
+Controller = Callable[[Task, int, random.Random], Tuple[bool, int]]
 
 
-def _simulate_completion(scenario: Scenario, reentry_point: int) -> tuple[bool, int]:
-    """Heuristic task-completion oracle used during benchmarking.
+def _attempt(task: Task, j: int, rng: random.Random) -> bool:
+    return rng.random() < task.attempt_success_prob(j)
 
-    Returns (completed, n_calls_used).
-    In real evaluation this calls an LLM; here it uses ground truth proximity.
+
+def retry_at_crash(task: Task, budget: int, rng: random.Random) -> Tuple[bool, int]:
+    """Durable-execution / retry-library baseline: only ever re-run the crash step."""
+    spent = 0
+    while spent + task.attempt_cost(task.crash) <= budget:
+        spent += task.attempt_cost(task.crash)
+        if _attempt(task, task.crash, rng):
+            return True, spent
+    return False, spent
+
+
+def rollback_all(task: Task, budget: int, rng: random.Random) -> Tuple[bool, int]:
+    """Blind full restart: always re-enter at step 1 (re-run the whole prefix)."""
+    spent = 0
+    while spent + task.attempt_cost(1) <= budget:
+        spent += task.attempt_cost(1)
+        if _attempt(task, 1, rng):
+            return True, spent
+    return False, spent
+
+
+def blind_search(task: Task, budget: int, rng: random.Random) -> Tuple[bool, int]:
+    """Uninformed re-entry: pick j uniformly among candidate steps each attempt."""
+    spent = 0
+    while True:
+        j = rng.randint(1, task.crash)
+        if spent + task.attempt_cost(j) > budget:
+            break
+        spent += task.attempt_cost(j)
+        if _attempt(task, j, rng):
+            return True, spent
+    return False, spent
+
+
+def attribution_guided(attr_accuracy: float) -> Controller:
+    """respawn's controller: re-enter using an attribution PRIOR over the root.
+
+    attr_accuracy in [1/crash, 1] is mixed by construction so that:
+      * attr_accuracy == 1.0     -> always re-enter at the true root  (= oracle)
+      * attr_accuracy == 1/crash -> re-enter uniformly                (= blind_search)
+    so the controller can NEVER beat blind search when attribution carries no
+    information. Between those, with weight w it re-enters at the true root,
+    otherwise uniformly -- modelling a noisy attributor that is right a w-fraction
+    of the time. The claim under test is that useful recovery appears well below
+    attr_accuracy = 1.
     """
-    steps_replayed = len(scenario.trace) - reentry_point
-    correct_reentry = reentry_point == scenario.ground_truth_reentry
-    # Simplified oracle: correct reentry → higher completion probability
-    completed = correct_reentry or (steps_replayed <= 3)
-    return completed, steps_replayed
+    def controller(task: Task, budget: int, rng: random.Random) -> Tuple[bool, int]:
+        floor = 1.0 / task.crash
+        w = 0.0 if task.crash <= 1 else max(
+            0.0, (attr_accuracy - floor) / (1.0 - floor))
+        spent = 0
+        while True:
+            if rng.random() < w:
+                j = task.root                      # attributor points at the cause
+            else:
+                j = rng.randint(1, task.crash)     # fall back to uninformed
+            if spent + task.attempt_cost(j) > budget:
+                break
+            spent += task.attempt_cost(j)
+            if _attempt(task, j, rng):
+                return True, spent
+        return False, spent
+    return controller
 
 
-def full_restart_controller(scenario: Scenario) -> RecoveryResult:
-    """Baseline: always restart from step 0."""
-    t0 = time.monotonic()
-    calls_baseline = len(scenario.trace)
-    completed, calls_used = _simulate_completion(scenario, reentry_point=0)
-    return RecoveryResult(
-        scenario_id=scenario.id,
-        strategy_used="full_restart",
-        reentry_point=0,
-        task_completed=completed,
-        calls_after_failure=calls_baseline,
-        calls_baseline=calls_baseline,
-        latency_seconds=time.monotonic() - t0,
-    )
-
-
-def naive_truncate_controller(scenario: Scenario) -> RecoveryResult:
-    """Truncate at the failing step, replay from there."""
-    t0 = time.monotonic()
-    calls_baseline = len(scenario.trace)
-    reentry = scenario.failure.step_index
-    completed, calls_used = _simulate_completion(scenario, reentry_point=reentry)
-    return RecoveryResult(
-        scenario_id=scenario.id,
-        strategy_used="naive_truncate",
-        reentry_point=reentry,
-        task_completed=completed,
-        calls_after_failure=calls_used,
-        calls_baseline=calls_baseline,
-        latency_seconds=time.monotonic() - t0,
-    )
-
-
-def respawn_controller(scenario: Scenario) -> RecoveryResult:
-    """Attribution-guided re-entry via Respawn."""
-    from respawn.failures import FailureEvent, FailureKind
-    from respawn.recover import plan
-
-    t0 = time.monotonic()
-    calls_baseline = len(scenario.trace)
-
-    failure = FailureEvent(
-        kind=FailureKind(scenario.failure.kind),
-        step_index=scenario.failure.step_index,
-        message=scenario.failure.message,
-    )
-    recovery_plan = plan(failure, scenario.trace_as_dicts())
-
-    completed, calls_used = _simulate_completion(
-        scenario, reentry_point=recovery_plan.reentry_point
-    )
-    return RecoveryResult(
-        scenario_id=scenario.id,
-        strategy_used=recovery_plan.strategy,
-        reentry_point=recovery_plan.reentry_point,
-        task_completed=completed,
-        calls_after_failure=calls_used,
-        calls_baseline=calls_baseline,
-        latency_seconds=time.monotonic() - t0,
-    )
+def oracle(task: Task, budget: int, rng: random.Random) -> Tuple[bool, int]:
+    """Upper bound: perfect attribution, always re-enter exactly at the root."""
+    spent = 0
+    while spent + task.attempt_cost(task.root) <= budget:
+        spent += task.attempt_cost(task.root)
+        if _attempt(task, task.root, rng):
+            return True, spent
+    return False, spent

@@ -1,48 +1,49 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
 name = "respawn"
 version = "0.1.0"
-description = "Attribution-guided re-entry for failing LLM agents"
+description = "Adaptive recovery for AI agents: re-enter at the step that caused the failure, not the one that crashed."
 readme = "README.md"
-license = { file = "LICENSE" }
-authors = [{ name = "Harshit Taneja", email = "team@londongulfnexus.com" }]
 requires-python = ">=3.9"
-dependencies = []   # core is intentionally zero-dep
-
-[project.optional-dependencies]
-bench = [
-    "anthropic>=0.30.0",
-    "openai>=1.30.0",
-    "matplotlib>=3.8.0",
-    "numpy>=1.26.0",
-    "tqdm>=4.66.0",
-    "jsonlines>=4.0.0",
+license = "MIT"
+authors = [{ name = "harshittaneja" }]
+keywords = ["llm", "agents", "reliability", "failure-attribution", "durable-execution", "recovery"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
-dev = [
-    "respawn[bench]",
-    "pytest>=8.0.0",
-    "pytest-cov>=5.0.0",
-    "ruff>=0.4.0",
-]
+dependencies = []   # core library is dependency-free
 
 [project.urls]
-Homepage = "https://github.com/harshittaneja/respawn"
-Issues = "https://github.com/harshittaneja/respawn/issues"
+Homepage = "https://github.com/H2908/respawn"
+Repository = "https://github.com/H2908/respawn"
+Issues = "https://github.com/H2908/respawn/issues"
 
-[tool.setuptools.packages.find]
-include = ["respawn*", "recoverybench*"]
+[project.optional-dependencies]
+bench = ["numpy>=1.24", "matplotlib>=3.7"]
+dev = ["pytest>=7", "ruff>=0.5", "numpy>=1.24", "matplotlib>=3.7"]
 
-[tool.ruff]
-line-length = 99
-target-version = "py39"
-
-[tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM"]
-ignore = ["E501"]
+[tool.hatch.build.targets.wheel]
+packages = ["respawn", "recoverybench", "probe", "recoverylab"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--tb=short -q"
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]   # errors, pyflakes, import-order
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"examples/*" = ["E701", "E702"]   # compact illustrative one-liners are fine in demos

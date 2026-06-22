@@ -1,128 +1,115 @@
-# Respawn
+<div align="center">
 
-> **Durable execution gives you the rewind button. Respawn decides where to rewind to — and what to change when you replay.**
+# 🎮 respawn
 
-[![PyPI](https://img.shields.io/pypi/v/respawn)](https://pypi.org/project/respawn/)
-[![Python](https://img.shields.io/pypi/pyversions/respawn)](https://pypi.org/project/respawn/)
-[![CI](https://github.com/harshittaneja/respawn/actions/workflows/ci.yml/badge.svg)](https://github.com/harshittaneja/respawn/actions)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+### Most agent failures originate *upstream* of where they surface — so the failing step is the wrong place to intervene.
 
----
+[![CI](https://github.com/<your-username>/respawn/actions/workflows/ci.yml/badge.svg)](https://github.com/<your-username>/respawn/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.9%2B-blue)](pyproject.toml)
+[![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-## The result
+**A measurement, a primitive to act on it, and an honest study of when acting helps.**
 
-On [RecoveryBench](RECOVERYBENCH.md), attribution-guided re-entry improves task completion by **4.3 percentage points** and reduces wasted LLM calls by **8×** compared to naive full-restart retry.
-
-![RecoveryBench results](docs/images/recoverybench_results.png)
+</div>
 
 ---
 
-## What problem does this solve?
+## The measurement
 
-Modern LLM agents fail — tool calls time out, context drifts, sub-agents deadlock. The standard response is to restart from scratch. That's expensive and often unnecessary: most failures invalidate only a small suffix of the execution trace, not the whole thing.
+On [**Who&When**](https://github.com/ag2ai/Agents_Failure_Attribution) (ICML 2025) — 184 real LLM multi-agent failures — the decisive error is at the **final step in only 4.3% of cases**. In **95.7%** the cause is *upstream* of where the failure surfaced (median 5 steps back).
 
-Respawn adds a recovery layer on top of any durable-execution framework (Temporal, Restate, modal, plain checkpoints). It:
+So durable execution and every retry library — which re-run the step that **crashed** — can structurally fix **at most ~4.3%** of real agent failures. The other 96% surfaced somewhere downstream of where they were caused.
 
-1. **Classifies the failure** — transient glitch, semantic drift, tool error, or policy violation.
-2. **Attributes the failure** to the specific step(s) that caused it (via [Who&When](https://github.com/harshittaneja/whoandwhen)).
-3. **Selects a recovery strategy** — truncate-and-replay, patch-and-continue, escalate, or abort.
-4. **Re-enters the agent** at the identified safe checkpoint with a corrected context.
+![respawn on Who&When](docs/images/whoandwhen_results.png)
 
----
+This is free and reproducible (`python experiments/whoandwhen.py`) — no model calls.
+
+## The honest finding
+
+If the cause is upstream, the natural fix is to **rewind to it and retry differently**. We tested that hypothesis on real models, and the answer is *it depends on the failure type* — which is the actual contribution here:
+
+- **On reasoning traces (Who&When), rewinding does NOT help** — a capable model re-reading the whole transcript self-corrects the upstream error *in place*, so rollback adds nothing. Live test: ≈1.0×, not significant. (A simulation predicted a large lift; it did **not** survive contact with real models.)
+- **On state-corrupting pipeline faults, rewinding DOES help — significantly** — when an early transform silently corrupts computed state, re-reading can't un-corrupt it; you must redo the faulty step and recompute. Live test (RecoveryLab, n=150, Haiku): **95% vs 78%**, McNemar **p<0.01**.
+
+![RecoveryLab result](docs/images/recoverylab_results.png)
+
+The contribution is that **boundary**, not a single headline number. Full detail and methodology: [`RESULTS.md`](RESULTS.md).
+
+## What respawn gives you
+
+A framework-agnostic primitive for the move that helps in the regime above: re-enter a failed run at the likely cause and retry differently. respawn owns the *policy* (where to re-enter, how to spend a budget); you own rollback + replay, so it sits on top of whatever you use (Temporal, DBOS, a checkpointer, a pure-function agent).
+
+```python
+from respawn import recover, point_attributor
+
+# any attributor: AgenTracer, an LLM-judge, or a heuristic
+attributor = point_attributor(step=4, confidence=0.6)
+
+def reexecute(from_step):
+    new = your_engine.resume_from(from_step, retry_differently=True)
+    return new.succeeded, new
+
+res = recover(trajectory, attributor, reexecute, budget=20)
+print(res.explain())
+```
+
+It also ships `respawn_chat` — wrap any `anthropic`/`openai` client so a single call survives rate-limits, timeouts, bad output, and auth errors by retrying *differently*:
+
+```python
+from respawn import respawn_chat, WeakOutput
+res = respawn_chat(client, messages=[...], model="claude-haiku-4-5",
+                   escalate=["claude-haiku-4-5", "claude-sonnet-4-6"],
+                   validate=my_validator)
+```
 
 ## Install
 
 ```bash
-pip install respawn                  # core library — zero runtime deps
-pip install "respawn[bench]"         # + RecoveryBench evaluation harness
-pip install "respawn[dev]"           # + dev/lint/test tooling
+pip install respawn            # core library, zero runtime dependencies
+pip install "respawn[bench]"   # + numpy/matplotlib for the experiments
 ```
 
----
+## How it works
 
-## Quick start
+| layer | re-runs… | gap |
+| --- | --- | --- |
+| Durable execution (Temporal/DBOS) | the crashing step | replays deterministic failures identically |
+| Retry libraries (tenacity, …) | the crashing step (differently) | the **wrong step** if the cause is upstream |
+| Attribution research (Who&When, AgenTracer) | nothing — it just **names** the cause | stops at the label, for debugging |
+| **respawn** | **the causal step**, re-entered & retried | helps when in-place re-reasoning *can't* (state-corrupting faults) |
 
-```python
-from respawn import Respawn
+`respawn.recover()` samples re-entry points from the attributor's posterior, with a uniform-exploration fallback so a wrong attributor can't trap the search. See [`docs/method.md`](docs/method.md).
 
-rs = Respawn()
-
-# Wrap any callable agent step
-@rs.guarded
-def my_agent_step(state):
-    ...
-
-# On failure, recover() returns a RecoveryPlan
-plan = rs.recover(failure=exc, trace=agent_trace)
-print(plan.strategy)      # e.g. "truncate_and_replay"
-print(plan.reentry_point) # step index to resume from
-print(plan.patch)         # context patch to apply before replay
-```
-
-See [examples/demo.py](examples/demo.py) for a full walkthrough without an API key, and [examples/demo_llm.py](examples/demo_llm.py) for a live LLM-backed example.
-
----
-
-## Architecture
-
-```
-Failure
-  │
-  ▼
-failures.py   ── classify ──► FailureKind (transient | semantic | tool | policy)
-  │
-  ▼
-recover.py    ── attribute ──► Who&When  (which step caused it?)
-  │                ▲
-  │                └── AgenTracer trace
-  ▼
-policy.py     ── select ──► Strategy (truncate | patch | escalate | abort)
-  │
-  ▼
-strategies.py ── execute ──► RecoveryPlan (reentry_point, patch, rationale)
-  │
-  ▼
-core.py       ── re-enter ──► resumed agent execution
-```
-
-Full design rationale: [docs/method.md](docs/method.md)
-
----
-
-## RecoveryBench
-
-[RecoveryBench](RECOVERYBENCH.md) is the evaluation harness bundled with this repo. It simulates 500 failure scenarios across 5 agent archetypes and scores recovery strategies on task-completion rate, token cost, and latency overhead.
+## Reproduce the experiments
 
 ```bash
-make data        # download / generate benchmark traces
-make reproduce   # run full benchmark (requires API key)
+python experiments/whoandwhen.py --data path/to/Who\&When   # the measurement (no key)
+python experiments/run_recoverybench.py                     # analytic model + sweeps
+python experiments/run_probe.py --provider anthropic --model claude-haiku-4-5   # reasoning-trace test (null)
+python experiments/run_recoverylab.py --provider anthropic --model claude-haiku-4-5 --n 150  # pipeline test (significant)
 ```
 
----
+Every experiment prints a McNemar significance verdict; RecoveryBench ships honesty guardrails as CI tests. Docs: [`RECOVERYBENCH.md`](RECOVERYBENCH.md), [`PROBE.md`](PROBE.md), [`RECOVERYLAB.md`](RECOVERYLAB.md).
 
-## Citation
+## Scope, honestly
 
-If you use Respawn or RecoveryBench in your research, please cite:
+This repo proves a measurement and maps where acting on it helps. It does **not** claim a universal recovery win — the simulated large lift held only in the narrow regime where rollback is structurally necessary, and was null on reasoning traces. Numbers are Haiku; stronger models shift absolutes. Every assumption is in the code.
 
-```bibtex
-@software{taneja2026respawn,
-  author  = {Taneja, Harshit},
-  title   = {Respawn: Attribution-Guided Re-Entry for Failing LLM Agents},
-  year    = {2026},
-  url     = {https://github.com/harshittaneja/respawn},
-}
-```
+## Roadmap
 
-See [CITATION.cff](CITATION.cff) for the full citation including Who&When and AgenTracer.
+- [x] Who&When measurement of upstream-cause prevalence.
+- [x] Live re-execution probe (reasoning traces — null) and controlled pipeline test (significant).
+- [ ] Real attributor adapters (AgenTracer, LLM-judge) behind the `attributor` interface.
+- [ ] Durable-execution adapters (`reexecute` for Temporal / DBOS).
+- [ ] Side-effect compensation for non-re-enterable steps.
 
----
+Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
-## Contributing
+## Citing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). The short version: don't break the guardrails (the `tests/` suite is the contract), and open an issue before a large PR.
-
----
+See [CITATION.cff](CITATION.cff), and cite the work this builds on: Zhang et al., *Which Agent Causes Task Failures and When?* (Who&When), ICML 2025; *AgenTracer*, 2025.
 
 ## License
 
-[MIT](LICENSE) © 2026 Harshit Taneja
+MIT — see [LICENSE](LICENSE).

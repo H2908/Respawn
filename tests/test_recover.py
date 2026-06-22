@@ -1,59 +1,52 @@
-from respawn.failures import FailureEvent, FailureKind, classify
-from respawn.recover import _heuristic_cause, make_patch, plan
-from respawn.strategies import Strategy
+"""Tests for respawn.recover -- attribution-guided re-entry."""
+import random
 
-TRACE = [
-    {"index": i, "role": "agent" if i % 2 == 0 else "tool", "content": f"step {i}",
-     "tool_result": {"ok": True} if i % 2 == 1 else None}
-    for i in range(10)
-]
+from respawn import point_attributor, recover, uniform_attributor
 
 
-def test_classify_transient():
-    exc = TimeoutError("Connection timeout")
-    event = classify(exc, step_index=5)
-    assert event.kind == FailureKind.TRANSIENT
-    assert event.step_index == 5
+def make_reexecute(true_root, n):
+    """Recovers iff re-entered at or before the true causal step."""
+    def reexecute(j):
+        return (j <= true_root, list(range(n)))
+    return reexecute
 
 
-def test_classify_policy():
-    exc = ValueError("Content policy violation triggered")
-    event = classify(exc, step_index=3)
-    assert event.kind == FailureKind.POLICY
+def test_recovers_when_attributor_points_at_cause():
+    n, root = 10, 4
+    res = recover(list(range(n)), point_attributor(root, 0.9),
+                  make_reexecute(root, n), budget=60,
+                  rng=random.Random(0), explore=0.0)
+    assert res.recovered
+    assert res.reentries[-1].recovered
 
 
-def test_heuristic_transient_returns_failing_step():
-    event = FailureEvent(kind=FailureKind.TRANSIENT, step_index=7, message="timeout")
-    assert _heuristic_cause(event, TRACE) == 7
+def test_respects_budget_and_does_not_overspend():
+    n = 10  # cause at the very start -> each re-entry costs the whole trajectory
+    res = recover(list(range(n)), point_attributor(0, 1.0),
+                  make_reexecute(0, n), budget=5,
+                  rng=random.Random(0), explore=0.0)
+    assert not res.recovered
+    assert res.spent <= 5
 
 
-def test_heuristic_semantic_walks_back():
-    event = FailureEvent(kind=FailureKind.SEMANTIC, step_index=8, message="drift")
-    cause = _heuristic_cause(event, TRACE)
-    assert cause < 8
+def test_uniform_attributor_runs_as_blind_search():
+    n, root = 8, 3
+    res = recover(list(range(n)), uniform_attributor,
+                  make_reexecute(root, n), budget=80, rng=random.Random(1))
+    assert isinstance(res.recovered, bool)
+    assert res.spent <= 80
 
 
-def test_plan_transient_no_truncation():
-    event = FailureEvent(kind=FailureKind.TRANSIENT, step_index=9, message="timeout")
-    recovery = plan(event, TRACE)
-    assert recovery.strategy == Strategy.PATCH_AND_CONTINUE
-    assert recovery.reentry_point == 9
+def test_explore_escapes_a_confidently_wrong_attributor():
+    # attributor insists on step 9 (downstream of the real cause at 2);
+    # exploration must still find a recovering re-entry.
+    n, root = 10, 2
+    res = recover(list(range(n)), point_attributor(9, 1.0),
+                  make_reexecute(root, n), budget=400,
+                  rng=random.Random(3), explore=0.3)
+    assert res.recovered
 
 
-def test_plan_semantic_truncates():
-    event = FailureEvent(kind=FailureKind.SEMANTIC, step_index=8, message="drift")
-    recovery = plan(event, TRACE)
-    assert recovery.strategy == Strategy.TRUNCATE_AND_REPLAY
-    assert recovery.reentry_point < 8
-
-
-def test_make_patch_transient_has_hint():
-    event = FailureEvent(kind=FailureKind.TRANSIENT, step_index=5, message="rate limit")
-    patch = make_patch(event, cause_step=5, trace=TRACE)
-    assert "retry_hint" in patch
-
-
-def test_make_patch_semantic_has_warning():
-    event = FailureEvent(kind=FailureKind.SEMANTIC, step_index=7, message="off topic")
-    patch = make_patch(event, cause_step=3, trace=TRACE)
-    assert "drift_warning" in patch
+def test_empty_trajectory_is_safe():
+    res = recover([], point_attributor(0), lambda j: (True, []), budget=10)
+    assert not res.recovered and res.spent == 0
