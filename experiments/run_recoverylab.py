@@ -26,7 +26,12 @@ import matplotlib.pyplot as plt
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from recoverylab import (  # noqa: E402
-    MockAgent, RealAgent, execute, inject_fault, make_task, verify,
+    MockAgent,
+    RealAgent,
+    execute,
+    inject_fault,
+    make_task,
+    verify,
 )
 
 

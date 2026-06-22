@@ -35,8 +35,10 @@ Consequences that fall out of this model, none of them rigged:
 """
 
 from __future__ import annotations
+
 import random
 from dataclasses import dataclass
+
 
 @dataclass(frozen=True)
 class Task:

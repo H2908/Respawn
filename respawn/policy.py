@@ -8,11 +8,12 @@ failure is exhausted, recovery gives up and the original error propagates.
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import dataclass,field
-from typing import Dict,List,Optional
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional
 
 from .failures import FailureType
-from .strategies import Backoff , Decompose , Escalate, Reframe, Strategy
+from .strategies import Backoff, Decompose, Escalate, Reframe, Strategy
+
 
 def default_ladders()->Dict[FailureType,List[Strategy]]:
     return {
