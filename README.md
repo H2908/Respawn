@@ -1,134 +1,193 @@
-<div align="center">
-
 # 🎮 respawn
 
-### Most agent failures originate *upstream* of where they surface — so the failing step is the wrong place to intervene.
+<p align="center">
+  <strong>Your agent failed at step 9. The real mistake was step 3.<br>
+  Most tools retry step 9. respawn finds step 3.</strong>
+</p>
 
-[![CI](https://github.com/H2908/respawn/actions/workflows/ci.yml/badge.svg)](https://github.com/H2908/respawn/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/python-3.9%2B-blue)](pyproject.toml)
-[![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
-
-**A measurement, a primitive to act on it, and an honest study of when acting helps.**
-
-</div>
+<p align="center">
+  <a href="https://github.com/H2908/respawn/actions/workflows/ci.yml"><img src="https://github.com/H2908/respawn/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green.svg" alt="MIT License"></a>
+  <img src="https://img.shields.io/badge/python-3.9%2B-blue" alt="Python 3.9+">
+  <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs welcome"></a>
+</p>
 
 ---
 
-## The measurement
+## 😤 The Problem Everyone Ignores
 
-On [**Who&When**](https://github.com/ag2ai/Agents_Failure_Attribution) (ICML 2025) — 184 real LLM multi-agent failures — the decisive error is at the **final step in only 4.3% of cases**. In **95.7%** the cause is *upstream* of where the failure surfaced (median 5 steps back).
+You're running an AI agent pipeline. It fails.
 
-So durable execution and every retry library — which re-run the step that **crashed** — can structurally fix **at most ~4.3%** of real agent failures. The other 96% surfaced somewhere downstream of where they were caused.
+What do you do? You **retry the step that crashed.**
 
-![respawn on Who&When](docs/images/whoandwhen_results.png)
+That feels logical. But it's almost always wrong.
 
-This is free and reproducible (`python experiments/whoandwhen.py`) — no model calls.
+Here's why: we analyzed **184 real LLM multi-agent failures** (from the [Who&When](https://github.com/ag2ai/Agents_Failure_Attribution) dataset, ICML 2025) and found something shocking:
 
-## The honest finding
+<p align="center">
+  <br>
+  <b>In 95.7% of failures, the real cause happened UPSTREAM — not at the step that crashed.</b><br>
+  The median distance between cause and crash? <b>5 steps.</b>
+  <br><br>
+</p>
 
-If the cause is upstream, the natural fix is to **rewind to it and retry differently**. We tested that hypothesis on real models, and the answer is *it depends on the failure type* — which is the actual contribution here:
+> **Translation:** Every retry library, every durable execution framework — they're all retrying the *wrong step*. They can structurally fix **at most 4.3%** of real agent failures.
 
-- **On reasoning traces (Who&When), rewinding does NOT help** — a capable model re-reading the whole transcript self-corrects the upstream error *in place*, so rollback adds nothing. Live test: ≈1.0×, not significant. (A simulation predicted a large lift; it did **not** survive contact with real models.)
-- **On state-corrupting pipeline faults, rewinding DOES help — significantly** — when an early transform silently corrupts computed state, re-reading can't un-corrupt it; you must redo the faulty step and recompute. Live test (RecoveryLab, n=150, Haiku): **93% vs 79%**, McNemar **p≈0.001**.
+![Who&When Results](docs/images/whoandwhen_results.png)
 
-![RecoveryLab result](docs/images/recoverylab_results.png)
+---
 
-The contribution is that **boundary**, not a single headline number. Full detail and methodology: [`RESULTS.md`](RESULTS.md).
+## 💡 The Insight
 
-## What respawn gives you
+If the real mistake happened upstream, then the fix is simple in theory:
 
-A framework-agnostic primitive for the move that helps in the regime above: re-enter a failed run at the likely cause and retry differently. respawn owns the *policy* (where to re-enter, how to spend a budget); you own rollback + replay, so it sits on top of whatever you use (Temporal, DBOS, a checkpointer, a pure-function agent).
+**Rewind to where it went wrong. Retry from there. Differently.**
+
+But here's the honest part — it doesn't always help. We tested it on real models and found a clear boundary:
+
+| Failure Type | Does rewinding help? | Why |
+|---|---|---|
+| 🧠 Reasoning trace errors | ❌ No | A smart model re-reads the full transcript and self-corrects anyway |
+| ⚙️ State-corrupting pipeline faults | ✅ Yes — significantly | Once state is corrupted, re-reading can't fix it. You must redo the step. |
+
+**Real numbers from our RecoveryLab experiment (n=150, Claude Haiku):**
+- With respawn: **93% recovery**
+- Without respawn: **79% recovery**
+- Statistical significance: McNemar **p ≈ 0.001**
+
+![RecoveryLab Results](docs/images/recoverylab_results.png)
+
+The contribution isn't a magic bullet. It's knowing **exactly when rewinding helps** — and giving you the tool to do it.
+
+---
+
+## ⚡ Quick Start
+
+```bash
+pip install respawn
+```
 
 ```python
 from respawn import recover, point_attributor
 
-# any attributor: AgenTracer, an LLM-judge, or a heuristic
+# Tell respawn where you think the failure originated
 attributor = point_attributor(step=4, confidence=0.6)
 
+# Tell respawn how to re-run from any step
 def reexecute(from_step):
     new = your_engine.resume_from(from_step, retry_differently=True)
     return new.succeeded, new
 
-res = recover(trajectory, attributor, reexecute, budget=20)
-print(res.explain())
+# Let respawn find and fix it
+result = recover(trajectory, attributor, reexecute, budget=20)
+print(result.explain())
 ```
 
-It also ships `respawn_chat` — wrap any `anthropic`/`openai` client so a single call survives rate-limits, timeouts, bad output, and auth errors by retrying *differently*:
+### Protect any LLM call from transient failures
 
 ```python
-from respawn import respawn_chat, WeakOutput
-res = respawn_chat(client, messages=[...], model="claude-haiku-4-5",
-                   escalate=["claude-haiku-4-5", "claude-sonnet-4-6"],
-                   validate=my_validator)
+from respawn import respawn_chat
+
+# Automatically handles: rate limits, timeouts, bad output, auth errors
+result = respawn_chat(
+    client,
+    messages=[...],
+    model="claude-haiku-4-5",
+    escalate=["claude-haiku-4-5", "claude-sonnet-4-6"],  # upgrade model if needed
+    validate=my_validator
+)
 ```
 
-## Examples
+---
 
-Two runnable, offline showcases (no API key) that exercise the two halves of the
-claim on real, executing pipelines:
+## 🗂️ See It In Action
 
-- [`examples/csv_insights/`](examples/csv_insights/) — **what to change.** A messy
-  sales CSV where a silent parse fault reports **\$2,056** instead of the true
-  **\$16,117** (and the wrong top category). retry-at-crash stays wrong; respawn
-  re-enters at the parse step and recovers the correct figure.
-  `python examples/csv_insights/demo.py`
+Two offline demos — **no API key needed:**
 
-- [`examples/ambiguous_pipeline/`](examples/ambiguous_pipeline/) — **where to
-  rewind.** A 5-step pipeline where a bug propagates downstream so several steps
-  look guilty. With a deliberately *imperfect* attributor (~43% top-1), respawn
-  still recovers **58%** vs blind re-entry's **38%** (McNemar p<0.001) — deciding
-  where pays off even when the attribution is often wrong.
-  `python examples/ambiguous_pipeline/run.py --trials 400`
+### 1. `examples/csv_insights/` — *What to change*
+A pipeline silently misparses a sales CSV and reports **$2,056** instead of the real **$16,117**.
 
-## Install
+- Normal retry-at-crash: ❌ still wrong
+- respawn re-enters at the parse step: ✅ recovers the correct figure
 
 ```bash
-pip install respawn            # core library, zero runtime dependencies
-pip install "respawn[bench]"   # + numpy/matplotlib for the experiments
+python examples/csv_insights/demo.py
 ```
 
-## How it works
-
-| layer | re-runs… | gap |
-| --- | --- | --- |
-| Durable execution (Temporal/DBOS) | the crashing step | replays deterministic failures identically |
-| Retry libraries (tenacity, …) | the crashing step (differently) | the **wrong step** if the cause is upstream |
-| Attribution research (Who&When, AgenTracer) | nothing — it just **names** the cause | stops at the label, for debugging |
-| **respawn** | **the causal step**, re-entered & retried | helps when in-place re-reasoning *can't* (state-corrupting faults) |
-
-`respawn.recover()` samples re-entry points from the attributor's posterior, with a uniform-exploration fallback so a wrong attributor can't trap the search. See [`docs/method.md`](docs/method.md).
-
-## Reproduce the experiments
+### 2. `examples/ambiguous_pipeline/` — *Where to rewind*
+A 5-step pipeline where a bug propagates so that multiple steps *look* guilty. Even with an imperfect attributor (~43% accuracy), respawn recovers **58%** vs blind re-entry's **38%** (p < 0.001).
 
 ```bash
-python experiments/whoandwhen.py --data path/to/Who\&When   # the measurement (no key)
-python experiments/run_recoverybench.py                     # analytic model + sweeps
-python experiments/run_probe.py --provider anthropic --model claude-haiku-4-5   # reasoning-trace test (null)
-python experiments/run_recoverylab.py --provider anthropic --model claude-haiku-4-5 --n 150  # pipeline test (significant)
+python examples/ambiguous_pipeline/run.py --trials 400
 ```
 
-Every experiment prints a McNemar significance verdict; RecoveryBench ships honesty guardrails as CI tests. Docs: [`RECOVERYBENCH.md`](RECOVERYBENCH.md), [`PROBE.md`](PROBE.md), [`RECOVERYLAB.md`](RECOVERYLAB.md).
+---
 
-## Scope, honestly
+## 🔍 How respawn Fits In
 
-This repo proves a measurement and maps where acting on it helps. It does **not** claim a universal recovery win — the simulated large lift held only in the narrow regime where rollback is structurally necessary, and was null on reasoning traces. Numbers are Haiku; stronger models shift absolutes. Every assumption is in the code.
+| Tool | Retries… | The Gap |
+|---|---|---|
+| Durable execution (Temporal, DBOS) | The crashing step | Replays the same failure identically |
+| Retry libraries (tenacity, …) | The crashing step, differently | Still the **wrong step** |
+| Attribution research (Who&When) | Nothing — just labels the cause | Stops at the label |
+| **respawn** | **The causal step, re-entered & retried** | ✅ Fixes it when in-place reasoning can't |
 
-## Roadmap
+`respawn.recover()` samples re-entry points from the attributor's probability distribution, with a uniform-exploration fallback so a wrong attributor can't permanently trap the search. Full method: [`docs/method.md`](docs/method.md)
 
-- [x] Who&When measurement of upstream-cause prevalence.
-- [x] Live re-execution probe (reasoning traces — null) and controlled pipeline test (significant).
-- [x] Real-pipeline examples for both halves of the claim (what to change; where to rewind).
-- [ ] Real attributor adapters (AgenTracer, LLM-judge) behind the `attributor` interface.
-- [ ] Durable-execution adapters (`reexecute` for Temporal / DBOS).
-- [ ] Side-effect compensation for non-re-enterable steps.
+---
 
-Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
+## 🧪 Reproduce Everything
 
-## Citing
+```bash
+# The measurement — no API key needed
+python experiments/whoandwhen.py --data path/to/Who\&When
 
-See [CITATION.cff](CITATION.cff), and cite the work this builds on: Zhang et al., *Which Agent Causes Task Failures and When?* (Who&When), ICML 2025; *AgenTracer*, 2025.
+# Analytic model + parameter sweeps
+python experiments/run_recoverybench.py
+
+# Reasoning-trace test (result: null — rewinding doesn't help here)
+python experiments/run_probe.py --provider anthropic --model claude-haiku-4-5
+
+# Pipeline fault test (result: significant — 93% vs 79%)
+python experiments/run_recoverylab.py --provider anthropic --model claude-haiku-4-5 --n 150
+```
+
+Every experiment prints a McNemar significance verdict. No black boxes.
+
+---
+
+## 🗺️ Roadmap
+
+- [x] Who&When measurement of upstream-cause prevalence
+- [x] Live re-execution probe on reasoning traces (null result — honest)
+- [x] Controlled pipeline test showing significant improvement
+- [x] Real runnable examples for both halves of the claim
+- [ ] AgenTracer + LLM-judge adapters behind the `attributor` interface
+- [ ] Durable-execution adapters for Temporal / DBOS
+- [ ] Side-effect compensation for non-re-enterable steps
+
+---
+
+## 🤝 Contributing
+
+PRs welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) to get started.
+
+---
+
+## 📎 Citation
+
+If you use this in your research:
+
+```
+See CITATION.cff
+```
+
+Also cite the foundational work:
+- Zhang et al., *Which Agent Causes Task Failures and When?* (Who&When), ICML 2025
+- *AgenTracer*, 2025
+
+---
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE)
